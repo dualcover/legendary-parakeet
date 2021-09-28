@@ -1,0 +1,79 @@
+name: Publish website Updating gh-pages minified build
+
+on:
+    push:
+        branches:
+            - main
+            - master
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+concurrency:
+    group: gh-pages-minify
+    cancel-in-progress: true
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Verify stop Job eventual condition
+              id: repo_check
+              run: |
+                  repo=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+                  if [[ "$repo" == *"minifiable-frontend-model"* ]]; then
+                      echo "This is the repository of the minifiable frontend model, so there is no need to proceed further with the Job."
+                      exit 1
+                  fi
+
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+
+            - name: Setup Git
+              run: |
+                  git config user.name "frontend-minifier"
+                  git config user.email "frontend-minifier@users.noreply.github.com"
+
+            - name: Ensure gh-pages branch exists
+              run: |
+                  if ! git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+                      git branch gh-pages
+                      git push origin gh-pages
+                  fi
+
+            - name: Switch to gh-pages and reset to current branch
+              run: |
+                  BRANCH="${GITHUB_REF_NAME}"
+                  git fetch origin "$BRANCH" gh-pages
+                  git checkout -B gh-pages origin/gh-pages
+                  git reset --hard "origin/$BRANCH"
+
+            - name: Uncomment for minifier in index.html
+              run: |
+                  sed -i 's/!--UNCOMMENT_FOR_MINIFIER--//g' index.html
+
+            - name: Run minifier
+              run: |
+                  cd minifier
+                  node index
+
+            - name: Commit all changes
+              run: |
+                  git add -A
+                  if git diff --cached --quiet; then
+                      echo "No changes to commit";
+                  else
+                      git commit -m "Minified version";
+                  fi
+
+            - name: Force push gh-pages
+              run: |
+                  git push origin gh-pages --force
